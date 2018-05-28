@@ -1,6 +1,8 @@
 # ConstHashmap
 
-**TODO: Add description**
+![](https://i.imgur.com/ONIoa9s.jpg)
+
+Experimental constant time-complexity implementation of hashmap in Elixir.
 
 ## Installation
 
