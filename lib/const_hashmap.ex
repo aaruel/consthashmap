@@ -2,19 +2,41 @@ defmodule ConstHashmap.Element do
     @type t :: %__MODULE__{
         key: any(),
         value: any(),
-        reference_index: non_neg_integer() | nil
+        collision_pool: ConstHashmap.Pool.t | nil
     }
 
     defstruct   key: nil,
                 value: nil,
-                reference_index: nil
+                collision_pool: nil
 
-    def format(%__MODULE__{key: key, value: value}) do
+    def format(%__MODULE__{key: key, value: value, collision_pool: collision_pool}) do
+        if collision_pool do
+            ConstHashmap.Pool.format(collision_pool)
+        end
         "    " <> inspect(key) <> ": " <> inspect(value) <> "\n"
     end
     
-    def insert(key, value) do
-        %__MODULE__{key: key, value: value}
+    def insert(
+        %__MODULE__{key: o_key, value: o_value, collision_pool: collision_pool}, 
+        key, value, hash_level
+    ) do
+        if o_key == key do
+            %__MODULE__{
+                key: o_key,
+                value: value,
+                collision_pool: collision_pool
+            }
+        else
+            %__MODULE__{
+                key: o_key, 
+                value: o_value, 
+                collision_pool: ConstHashmap.Pool.insert(
+                    ConstHashmap.Pool.new(hash_level + 1),
+                    key,
+                    value
+                )
+            }
+        end
     end
 end
 
@@ -69,10 +91,16 @@ defmodule ConstHashmap.Pool do
     }
 
     defstruct   openings: @standard_openings,
-                data: ConstHashmap.Tools.two_power_data(@power_size)
+                data: ConstHashmap.Tools.two_power_data(@power_size),
+                hash_level: 0
 
-    def hash(key, mask_size) do
-        <<hk :: size(mask_size), _data :: bitstring>> = :crypto.hash(:sha256, inspect(key))
+    def new(hash_level) when is_integer(hash_level) do
+        %__MODULE__{hash_level: hash_level}
+    end
+
+    def hash(key, mask_size, hash_level) do
+        pad_size = mask_size * hash_level
+        <<_pad :: size(pad_size), hk :: size(mask_size), _data :: bitstring>> = :crypto.hash(:sha256, inspect(key))
         hk
     end
 
@@ -83,11 +111,17 @@ defmodule ConstHashmap.Pool do
         end) |> List.to_string
     end
 
-    def insert(%__MODULE__{data: data, openings: openings}, key, value) do
-        hash_index = hash(key, 3)
+    def insert(%__MODULE__{data: data, openings: openings, hash_level: hash_level}, key, value) do
+        hash_index = hash(key, 3, hash_level)
         u_openings = Enum.filter(openings, fn n -> n != hash_index end)
-        u_data = put_elem(data, hash_index, ConstHashmap.Element.insert(key, value))
-        
+        u_data = case elem(data, hash_index) do
+            %ConstHashmap.Element{key: nil} -> 
+                new_elem = %ConstHashmap.Element{key: key, value: value}
+                put_elem(data, hash_index, new_elem)
+            element -> 
+                new_elem = ConstHashmap.Element.insert(element, key, value, hash_level)
+                put_elem(data, hash_index, new_elem)
+        end
         %__MODULE__{data: u_data, openings: u_openings}
     end
 
@@ -102,22 +136,19 @@ defmodule ConstHashmap do
     """
 
     @type t :: %__MODULE__{
-        pool: [ConstHashmap.Pool.t]
+        pool: ConstHashmap.Pool.t
     }
 
-    defstruct   pool: [%ConstHashmap.Pool{}]
+    defstruct   pool: %ConstHashmap.Pool{}
 
     def format(%__MODULE__{pool: pool}) do
         "%ConstHashmap{\n" 
-            <> (Enum.map(pool, &ConstHashmap.Pool.format/1) |> List.to_string)
+            <> (pool |> ConstHashmap.Pool.format)
             <> "}"
     end
 
     def insert(%__MODULE__{pool: pool}, key, value) do
-        pools = ConstHashmap.Tools.modify_cond(pool, &ConstHashmap.Pool.is_vacant?/1, fn e ->
-            ConstHashmap.Pool.insert(e, key, value)
-        end)
-        %__MODULE__{pool: pools}
+        %__MODULE__{pool: ConstHashmap.Pool.insert(pool, key, value)}
     end
 end
 
