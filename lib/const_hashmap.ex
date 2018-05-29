@@ -38,6 +38,21 @@ defmodule ConstHashmap.Element do
             }
         end
     end
+
+    def get(
+        %__MODULE__{value: o_value, key: o_key, collision_pool: collision_pool}, 
+        key
+    ) do
+        if o_key == key do
+            o_value
+        else
+            if collision_pool do
+                ConstHashmap.Pool.get(collision_pool, key)
+            else
+                nil
+            end
+        end
+    end
 end
 
 defmodule ConstHashmap.Tools do
@@ -77,6 +92,12 @@ defmodule ConstHashmap.Tools do
         list = generate_nsize_list(pow2_signed(power), %ConstHashmap.Element{})
         list |> List.to_tuple
     end
+
+    def hash(key, mask_size, hash_level) do
+        pad_size = mask_size * hash_level
+        <<_pad :: size(pad_size), hk :: size(mask_size), _data :: bitstring>> = :crypto.hash(:sha256, inspect(key))
+        hk
+    end
 end
 
 defmodule ConstHashmap.Pool do
@@ -98,12 +119,6 @@ defmodule ConstHashmap.Pool do
         %__MODULE__{hash_level: hash_level}
     end
 
-    def hash(key, mask_size, hash_level) do
-        pad_size = mask_size * hash_level
-        <<_pad :: size(pad_size), hk :: size(mask_size), _data :: bitstring>> = :crypto.hash(:sha256, inspect(key))
-        hk
-    end
-
     def format(%__MODULE__{data: data, openings: openings}) do
         occupied = @standard_openings -- openings
         Enum.map(occupied, fn index -> 
@@ -112,7 +127,7 @@ defmodule ConstHashmap.Pool do
     end
 
     def insert(%__MODULE__{data: data, openings: openings, hash_level: hash_level}, key, value) do
-        hash_index = hash(key, 3, hash_level)
+        hash_index = ConstHashmap.Tools.hash(key, @power_size, hash_level)
         u_openings = Enum.filter(openings, fn n -> n != hash_index end)
         u_data = case elem(data, hash_index) do
             %ConstHashmap.Element{key: nil} -> 
@@ -125,8 +140,15 @@ defmodule ConstHashmap.Pool do
         %__MODULE__{data: u_data, openings: u_openings}
     end
 
-    def is_vacant?(%__MODULE__{openings: openings}) do
-        (openings |> Enum.count) > 0
+    def get(%__MODULE__{data: data, hash_level: hash_level}, key) do
+        hash_index = ConstHashmap.Tools.hash(key, @power_size, hash_level)
+        IO.inspect(elem(data, hash_index))
+        case elem(data, hash_index) do
+            %ConstHashmap.Element{key: nil} -> 
+                nil
+            element -> 
+                ConstHashmap.Element.get(element, key)
+        end
     end
 end
 
@@ -149,6 +171,10 @@ defmodule ConstHashmap do
 
     def insert(%__MODULE__{pool: pool}, key, value) do
         %__MODULE__{pool: ConstHashmap.Pool.insert(pool, key, value)}
+    end
+
+    def get(%__MODULE__{pool: pool}, key) do
+        ConstHashmap.Pool.get(pool, key)
     end
 end
 
