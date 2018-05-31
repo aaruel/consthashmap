@@ -43,14 +43,10 @@ defmodule ConstHashmap.Element do
         %__MODULE__{value: o_value, key: o_key, collision_pool: collision_pool}, 
         key
     ) do
-        if o_key == key do
-            o_value
-        else
-            if collision_pool do
-                ConstHashmap.Pool.get(collision_pool, key)
-            else
-                nil
-            end
+        cond do
+            o_key == key -> o_value
+            collision_pool -> ConstHashmap.Pool.get(collision_pool, key)
+            true -> nil
         end
     end
 end
@@ -108,7 +104,8 @@ defmodule ConstHashmap.Pool do
 
     @type t :: %__MODULE__{
         openings: [non_neg_integer()],
-        data: {ConstHashmap.Element.t}
+        data: {ConstHashmap.Element.t},
+        hash_level: non_neg_integer()
     }
 
     defstruct   openings: @standard_openings,
@@ -130,8 +127,8 @@ defmodule ConstHashmap.Pool do
         hash_index = ConstHashmap.Tools.hash(key, @power_size, hash_level)
         u_openings = Enum.filter(openings, fn n -> n != hash_index end)
         u_data = case elem(data, hash_index) do
-            %ConstHashmap.Element{key: nil} -> 
-                new_elem = %ConstHashmap.Element{key: key, value: value}
+            %ConstHashmap.Element{key: nil, collision_pool: collision_pool} -> 
+                new_elem = %ConstHashmap.Element{key: key, value: value, collision_pool: collision_pool}
                 put_elem(data, hash_index, new_elem)
             element -> 
                 new_elem = ConstHashmap.Element.insert(element, key, value, hash_level)
@@ -142,9 +139,8 @@ defmodule ConstHashmap.Pool do
 
     def get(%__MODULE__{data: data, hash_level: hash_level}, key) do
         hash_index = ConstHashmap.Tools.hash(key, @power_size, hash_level)
-        IO.inspect(elem(data, hash_index))
         case elem(data, hash_index) do
-            %ConstHashmap.Element{key: nil} -> 
+            %ConstHashmap.Element{key: nil, collision_pool: nil} -> 
                 nil
             element -> 
                 ConstHashmap.Element.get(element, key)

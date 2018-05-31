@@ -31,4 +31,13 @@ defmodule ConstHashmapTest do
         
         assert hm == "%ConstHashmap{\n    \"hello\": \"planet\"\n}"
     end
+
+    test "base get" do
+        hm = %ConstHashmap{} 
+            |> ConstHashmap.insert("hello", "world") 
+            |> ConstHashmap.insert("goodbye", "planet")
+            |> ConstHashmap.get("hello")
+
+        assert hm == "world"
+    end
 end
